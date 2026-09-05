@@ -24,9 +24,9 @@ def save_data(data):
         json.dump(data, f, indent=4)
 
 # --- Format Groups Text Export ---
-def generate_group_text(players, leaders):
+def generate_group_text(players, leaders, num_teams):
     output_lines = []
-    for g in range(1, 4):
+    for g in range(1, num_teams + 1):
         leader_name = leaders[g - 1]
         # Collect all members assigned to group g
         group_members = [p["nickname"] for p in players if p.get("group") == g]
@@ -42,17 +42,16 @@ def generate_group_text(players, leaders):
     return "\n\n".join(output_lines)
 
 # --- Balancing Algorithm ---
-def auto_balance(players, leader1, leader2, leader3):
+def auto_balance(players, leaders, num_teams):
     # Reset groups
     for p in players:
         p["group"] = 0
 
-    # Assign Leaders
-    groups = {1: [], 2: [], 3: []}
-    group_powers = {1: 0, 2: 0, 3: 0}
+    groups = {g: [] for g in range(1, num_teams + 1)}
+    group_powers = {g: 0 for g in range(1, num_teams + 1)}
 
-    leader_names = [leader1, leader2, leader3]
-    for idx, lname in enumerate(leader_names, start=1):
+    # Assign Leaders
+    for idx, lname in enumerate(leaders, start=1):
         for p in players:
             if p["nickname"] == lname:
                 p["group"] = idx
@@ -77,12 +76,11 @@ def auto_balance(players, leader1, leader2, leader3):
 st.set_page_config(page_title="Teams Planner", layout="wide")
 st.title("Teams Planner")
 
-# FIX: Set 'rosters' in session state instead of 'players'
 if "rosters" not in st.session_state:
     st.session_state.rosters = load_data()
 
 # --- Sidebar: Multi-Roster Manager ---
-st.sidebar.header("📁 Roster Management")
+st.sidebar.header("Roster Management")
 
 roster_names = list(st.session_state.rosters.keys())
 selected_roster = st.sidebar.selectbox("Select Active Roster", roster_names)
@@ -183,27 +181,39 @@ st.header(f"2. Group Distribution")
 
 all_nicknames = [p["nickname"] for p in current_players]
 
-if len(all_nicknames) >= 3:
-    col_l1, col_l2, col_l3 = st.columns(3)
-    leader1 = col_l1.selectbox("Group 1 Leader", all_nicknames, index=0, key=f"l1_{selected_roster}")
-    leader2 = col_l2.selectbox("Group 2 Leader", all_nicknames, index=min(1, len(all_nicknames)-1), key=f"l2_{selected_roster}")
-    leader3 = col_l3.selectbox("Group 3 Leader", all_nicknames, index=min(2, len(all_nicknames)-1), key=f"l3_{selected_roster}")
+# Dynamic Team Count Selection
+num_teams = st.number_input("Number of Teams/Groups", min_value=2, max_value=10, value=3, step=1, key=f"num_teams_{selected_roster}")
 
-    if len(set([leader1, leader2, leader3])) < 3:
-        st.warning("Please select 3 unique leaders.")
+if len(all_nicknames) >= num_teams:
+    st.subheader("Select Group Leaders")
+    leader_cols = st.columns(num_teams)
+    leaders = []
+
+    for i in range(num_teams):
+        with leader_cols[i]:
+            default_index = min(i, len(all_nicknames) - 1)
+            selected_leader = st.selectbox(
+                f"Group {i+1} Leader",
+                all_nicknames,
+                index=default_index,
+                key=f"l{i+1}_{selected_roster}_{num_teams}"
+            )
+            leaders.append(selected_leader)
+
+    if len(set(leaders)) < num_teams:
+        st.warning(f"Please select {num_teams} unique leaders.")
     else:
         if st.button("Auto-Balance Remaining Players", type="primary"):
-            st.session_state.rosters[selected_roster] = auto_balance(current_players, leader1, leader2, leader3)
+            st.session_state.rosters[selected_roster] = auto_balance(current_players, leaders, num_teams)
             save_data(st.session_state.rosters)
             st.rerun()
 
     st.markdown("---")
     st.subheader("3. Group Overview & Manual Adjustments")
 
-    cols = st.columns(3)
-    leaders = [leader1, leader2, leader3]
+    cols = st.columns(num_teams)
 
-    for g in range(1, 4):
+    for g in range(1, num_teams + 1):
         with cols[g - 1]:
             group_members = [p for p in current_players if p.get("group") == g]
             total_power = sum(p["power"] for p in group_members)
@@ -220,15 +230,15 @@ if len(all_nicknames) >= 3:
                 
                 new_group = p_col2.selectbox(
                     "Group", 
-                    options=[1, 2, 3], 
+                    options=list(range(1, num_teams + 1)), 
                     index=g - 1, 
-                    key=f"override_{selected_roster}_{p['nickname']}"
+                    key=f"override_{selected_roster}_{p['nickname']}_{num_teams}"
                 )
                 if new_group != g:
                     p["group"] = new_group
                     save_data(st.session_state.rosters)
                     st.rerun()
-
+                    
     st.markdown("---")
     
     # --- Download Text Export Section ---
